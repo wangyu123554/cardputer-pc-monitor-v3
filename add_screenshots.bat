@@ -20,13 +20,10 @@ if not exist "%SRC%" (
     exit /b 1
 )
 
-python -c "from pathlib import Path; from PIL import Image; src=Path(r'%SRC%'); dest=Path(r'%DEST%'); files=sorted(src.glob('*.jpg')); names=['cpu-page.jpg','ram-page.jpg','proc-page.jpg','io-page.jpg','gpu-page.jpg','settings-page.jpg'];
-assert len(files)==6, f'need 6 jpg, got {len(files)}';
-[old.unlink() for old in dest.glob('*.jpg')];
-[(lambda s,n: (lambda im: im.save(dest/n,'JPEG',quality=85,optimize=True))( (lambda im: im.resize((960,int(im.height*960/im.width)), Image.LANCZOS) if im.width>960 else im)(Image.open(s).convert('RGB')) ))(s,n) for s,n in zip(files,names)]; print('OK:', len(names), 'images')"
+python -c "import shutil; from pathlib import Path; src=Path(r'%SRC%'); dest=Path(r'%DEST%'); files=sorted(src.glob('*.jpg')); assert len(files)==6; [old.unlink() for old in dest.glob('*.jpg')]; names=['cpu-page.jpg','ram-page.jpg','proc-page.jpg','io-page.jpg','gpu-page.jpg','settings-page.jpg']; [shutil.copy2(s, dest/n) for s,n in zip(files,names)]; print('OK: copied', len(names), 'original images')"
 
 if errorlevel 1 (
-    echo ERROR: Python/Pillow failed. Run: pip install pillow
+    echo ERROR: copy failed
     pause
     exit /b 1
 )
