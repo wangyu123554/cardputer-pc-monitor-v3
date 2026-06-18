@@ -345,13 +345,15 @@ def _walk_lhm_sensors(node: Any, out: list[tuple[str, float, str]]) -> None:
         value_raw = node.get("Value")
         text = str(node.get("Text", ""))
         node_id = str(node.get("id", ""))
+        sensor_id = str(node.get("SensorId", ""))
         value = _parse_sensor_value(value_raw)
 
         is_temp_type = sensor_type.lower() == "temperature"
-        is_temp_path = "/temperature/" in node_id.lower() or "temperature" in node_id.lower()
-        name_hints = any(k in text.lower() for k in ("package", "tctl", "tdie", "core", "cpu"))
+        is_temp_path = "/temperature/" in sensor_id.lower()
 
-        if value is not None and (is_temp_type or is_temp_path or (name_hints and value >= 15)):
+        # Only real temperature sensors — name-only matching wrongly picked CPU Package
+        # power (W) and GPU core clock (MHz) as degrees Celsius.
+        if value is not None and (is_temp_type or is_temp_path):
             out.append((text, value, node_id))
 
         for child in node.get("Children", []) or []:
@@ -375,6 +377,7 @@ def _pick_cpu_temp(temps: list[tuple[str, float, str]]) -> Optional[float]:
     skip = (
         "gpu", "hot spot", "memory", "vrm", "mos", "chipset", "pch",
         "socket", "ambient", "drive", "nvme", "ssd", "hdd", "wifi",
+        "distance to tjmax",
     )
 
     def usable(text: str, node_id: str) -> bool:
