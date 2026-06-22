@@ -131,6 +131,7 @@ _worker_started = False
 
 _cpu_metrics: dict[str, Any] = {"usage": 0.0, "core_max": 0.0, "freq_mhz": None}
 _cpu_metrics_lock = threading.Lock()
+_cpu_refresh_lock = threading.Lock()
 _top_processes: list[dict[str, Any]] = []
 _process_lock = threading.Lock()
 _ping_ms_cache: Optional[float] = None
@@ -457,7 +458,7 @@ def _refresh_process_cache() -> None:
     global _top_processes
     rows: list[dict[str, Any]] = []
     try:
-        procs = list(psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]))
+        procs = list(psutil.process_iter(["pid", "name", "memory_info"]))
         for proc in procs:
             try:
                 proc.cpu_percent(interval=None)
@@ -465,12 +466,11 @@ def _refresh_process_cache() -> None:
                 continue
         for proc in procs:
             try:
-                info = proc.info
-                name = info.get("name") or "?"
+                name = proc.info.get("name") or "?"
                 if name.lower() in ("system idle process", "_total"):
                     continue
-                cpu = info.get("cpu_percent") or 0.0
-                mem_info = info.get("memory_info")
+                cpu = proc.cpu_percent(interval=None) or 0.0
+                mem_info = proc.info.get("memory_info")
                 mem_mb = round(mem_info.rss / (1024 * 1024), 1) if mem_info else 0.0
                 rows.append({"name": name, "cpu": round(float(cpu), 1), "mem_mb": mem_mb})
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
@@ -517,20 +517,25 @@ def _refresh_ping_cache() -> None:
 
 
 def _refresh_cpu_metrics() -> None:
-    """Background CPU sampling — interval=0 on /stats always returns 0 on Windows."""
+    """Background CPU sampling — one percpu snapshot avoids Windows race / zero core_max."""
     global _cpu_metrics
     try:
-        usage = round(psutil.cpu_percent(interval=0.3), 1)
-        per_core = psutil.cpu_percent(interval=0, percpu=True)
-        core_max = round(max(per_core), 1) if per_core else usage
-        freq_mhz: Optional[int] = None
-        freq = psutil.cpu_freq()
-        if freq and freq.current:
-            freq_mhz = int(freq.current)
-        with _cpu_metrics_lock:
-            _cpu_metrics["usage"] = usage
-            _cpu_metrics["core_max"] = core_max
-            _cpu_metrics["freq_mhz"] = freq_mhz
+        with _cpu_refresh_lock:
+            per_core = psutil.cpu_percent(interval=0.3, percpu=True)
+            if per_core:
+                usage = round(sum(per_core) / len(per_core), 1)
+                core_max = round(max(per_core), 1)
+            else:
+                usage = 0.0
+                core_max = 0.0
+            freq_mhz: Optional[int] = None
+            freq = psutil.cpu_freq()
+            if freq and freq.current:
+                freq_mhz = int(freq.current)
+            with _cpu_metrics_lock:
+                _cpu_metrics["usage"] = usage
+                _cpu_metrics["core_max"] = core_max
+                _cpu_metrics["freq_mhz"] = freq_mhz
     except Exception:
         pass
 

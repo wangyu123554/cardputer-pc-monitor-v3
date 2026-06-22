@@ -3,7 +3,7 @@
 #include "wifi_manager.h"
 
 namespace {
-const uint32_t kStatsIntervalMs = 2500;
+const uint32_t kStatsIntervalMs = 1500;
 const uint16_t kHttpTimeoutMs = 3000;
 
 String formatHttpError(int code) {

@@ -61,7 +61,13 @@ void MonitorUi::update() {
   bool statsUpdated = statsClient_ != nullptr && statsClient_->consumeUpdated();
   if (statsUpdated && statsClient_ != nullptr) {
     const PcStats& s = statsClient_->currentStats();
-    float histVal = s.cpuUsage > 0 ? s.cpuUsage : s.cpuCoreMax;
+    float histVal = s.cpuUsage;
+    if (s.cpuCoreMax > histVal) {
+      histVal = s.cpuCoreMax;
+    }
+    if (histVal < 0.0f) {
+      histVal = 0.0f;
+    }
     pushHistory(cpuHistory_, cpuHistoryIdx_, cpuHistoryFilled_, histVal);
     pushHistory(ramHistory_, ramHistoryIdx_, ramHistoryFilled_, s.ramUsage);
     if (s.topProcessCount > 0) {
