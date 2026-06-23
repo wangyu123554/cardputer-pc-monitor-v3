@@ -4,7 +4,7 @@
 
 namespace {
 const uint32_t kStatsIntervalMs = 1500;
-const uint16_t kHttpTimeoutMs = 3000;
+const uint16_t kHttpTimeoutMs = 5000;
 
 String formatHttpError(int code) {
   if (code == -1) {

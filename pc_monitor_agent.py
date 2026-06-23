@@ -127,6 +127,12 @@ _lhm_fail_until: float = 0.0
 _lhm_dir_cache: Optional[str] = None
 _lhm_exe_cache: Optional[str] = None
 _lhm_lock = threading.Lock()
+_lhm_restart_last: float = 0.0
+_lhm_restart_cooldown_s: float = 90.0
+_lhm_dll_last_attempt: float = 0.0
+_lhm_dll_interval_s: float = 60.0
+_lhm_acpi_last_attempt: float = 0.0
+_lhm_acpi_interval_s: float = 30.0
 _worker_started = False
 
 _cpu_metrics: dict[str, Any] = {"usage": 0.0, "core_max": 0.0, "freq_mhz": None}
@@ -166,6 +172,42 @@ def _is_lhm_process_running() -> bool:
     return False
 
 
+def _configure_lhm_config(exe: str) -> None:
+    """Ensure Remote Web Server settings are valid (listenerIp must not be blank/corrupt)."""
+    cfg = os.path.join(os.path.dirname(exe), "LibreHardwareMonitor.config")
+    if not os.path.isfile(cfg):
+        return
+    ps_script = f"""
+$ErrorActionPreference = 'Stop'
+[xml]$xml = Get-Content -LiteralPath '{cfg.replace("'", "''")}' -Encoding UTF8
+$apps = $xml.configuration.appSettings
+function Set-Key($k,$v) {{
+  $item = $apps.add | Where-Object {{ $_.key -eq $k }}
+  if (-not $item) {{
+    $item = $xml.CreateElement('add')
+    $item.SetAttribute('key',$k)
+    [void]$apps.AppendChild($item)
+  }}
+  $item.value = $v
+}}
+Set-Key 'listenerIp' '0.0.0.0'
+Set-Key 'listenerPort' '8090'
+Set-Key 'runWebServerMenuItem' 'true'
+Set-Key 'authenticationEnabled' 'false'
+$xml.Save('{cfg.replace("'", "''")}')
+"""
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception:
+        pass
+
+
 def ensure_lhm_running() -> None:
     if _is_lhm_process_running():
         return
@@ -173,14 +215,58 @@ def ensure_lhm_running() -> None:
     if not exe:
         return
     workdir = os.path.dirname(exe)
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    _configure_lhm_config(exe)
     try:
-        subprocess.Popen([exe], cwd=workdir, creationflags=flags)
+        # GUI app — minimize startup flash; Agent (pythonw) has no console of its own.
+        kwargs: dict[str, Any] = {"cwd": workdir}
+        if sys.platform == "win32":
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 7  # SW_MINIMIZE — LHM goes to tray
+            kwargs["startupinfo"] = si
+        subprocess.Popen([exe], **kwargs)
     except Exception:
-        try:
-            subprocess.Popen([exe], cwd=workdir)
-        except Exception:
-            pass
+        pass
+
+
+def _is_lhm_http_ok() -> bool:
+    return _fetch_lhm_tree() is not None
+
+
+def _restart_lhm_process() -> None:
+    """LHM process can run with Remote Web Server stopped — restart to recover HTTP."""
+    global _lhm_restart_last, _lhm_fail_until
+    now = time.monotonic()
+    if now - _lhm_restart_last < _lhm_restart_cooldown_s:
+        return
+    _lhm_restart_last = now
+    try:
+        subprocess.run(
+            ["taskkill", "/IM", "LibreHardwareMonitor.exe", "/F"],
+            capture_output=True,
+            timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception:
+        pass
+    time.sleep(2)
+    exe = _find_lhm_exe()
+    if exe:
+        _configure_lhm_config(exe)
+    ensure_lhm_running()
+    time.sleep(8)
+    _lhm_fail_until = 0.0
+
+
+def _ensure_lhm_healthy() -> None:
+    if _is_lhm_http_ok():
+        return
+    if _is_lhm_process_running():
+        _restart_lhm_process()
+    else:
+        ensure_lhm_running()
+        time.sleep(6)
+        _lhm_fail_until = 0.0
 
 
 def _find_lhm_dir() -> Optional[str]:
@@ -541,7 +627,7 @@ def _refresh_cpu_metrics() -> None:
 
 
 def _refresh_cpu_temp_cache() -> None:
-    """Background-only: fetch CPU temp via LHM HTTP (never blocks /stats)."""
+    """Background-only: LHM HTTP first, then DLL/ACPI fallbacks (never blocks /stats)."""
     global _lhm_temp_cache, _lhm_cache_at
 
     temp: Optional[float] = None
@@ -552,6 +638,22 @@ def _refresh_cpu_temp_cache() -> None:
         raw = _pick_cpu_temp(lhm_temps)
         if raw is not None:
             temp = _smooth_cpu_temp(raw)
+
+    if temp is None:
+        now = time.monotonic()
+        if now - _lhm_dll_last_attempt >= _lhm_dll_interval_s:
+            _lhm_dll_last_attempt = now
+            raw = _collect_cpu_temp_lhm_dll()
+            if raw is not None:
+                temp = _smooth_cpu_temp(raw)
+
+    if temp is None:
+        now = time.monotonic()
+        if now - _lhm_acpi_last_attempt >= _lhm_acpi_interval_s:
+            _lhm_acpi_last_attempt = now
+            raw = _collect_cpu_temp_acpi()
+            if raw is not None:
+                temp = _smooth_cpu_temp(raw)
 
     with _lhm_lock:
         if temp is not None:
@@ -566,7 +668,7 @@ def collect_cpu_temp_c() -> Optional[float]:
 
 
 def _background_worker() -> None:
-    ensure_lhm_running()
+    _ensure_lhm_healthy()
     time.sleep(2)
     _refresh_cpu_metrics()
     _refresh_cpu_temp_cache()
@@ -580,10 +682,9 @@ def _background_worker() -> None:
             if tick % 10 == 0:
                 _refresh_ping_cache()
             if tick % 5 == 0:
-                if not _is_lhm_process_running():
-                    ensure_lhm_running()
-                    time.sleep(8)
                 _refresh_cpu_temp_cache()
+            if tick % 20 == 0:
+                _ensure_lhm_healthy()
         except Exception:
             pass
         tick += 1

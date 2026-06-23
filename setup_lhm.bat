@@ -50,30 +50,33 @@ if not defined LHM_EXE (
 
 echo Found: !LHM_EXE!
 
-REM Enable HTTP web server on port 8085 (required for CPU temp)
-powershell -NoProfile -Command "$exe='!LHM_EXE!'; $dir=Split-Path -Path $exe -Parent; $cfg=Join-Path $dir 'LibreHardwareMonitor.config'; if (-not (Test-Path $cfg)) { Write-Host 'WARN: config not found'; exit 0 }; [xml]$xml=Get-Content $cfg -Encoding UTF8; $apps=$xml.configuration.appSettings; $key=$apps.add | Where-Object { $_.key -eq 'runWebServerMenuItem' }; if (-not $key) { $n=$xml.CreateElement('add'); $n.SetAttribute('key','runWebServerMenuItem'); $n.SetAttribute('value','true'); [void]$apps.AppendChild($n) } else { $key.value='true' }; $xml.Save($cfg); Write-Host 'Enabled Remote Web Server (port 8085)'"
+set "START_LHM=%~dp0start_lhm.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%START_LHM%"
 
 set TASK=LibreHardwareMonitor
 schtasks /Query /TN "%TASK%" >nul 2>&1
 if not errorlevel 1 schtasks /Delete /TN "%TASK%" /F >nul
 
-echo Creating logon task (run in background)...
-schtasks /Create /TN "%TASK%" /TR "\"!LHM_EXE!\"" /SC ONLOGON /RL HIGHEST /F
+echo Creating logon task (hidden via wscript, once per login)...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "$vbs='%~dp0run_lhm_hidden.vbs';" ^
+  "$name='LibreHardwareMonitor';" ^
+  "Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue;" ^
+  "$action=New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('//B \"{0}\"' -f $vbs);" ^
+  "$trigger=New-ScheduledTaskTrigger -AtLogOn;" ^
+  "$trigger.Delay='PT45S';" ^
+  "$settings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -Hidden -ExecutionTimeLimit (New-TimeSpan -Minutes 2);" ^
+  "Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Settings $settings -Description 'Start LibreHardwareMonitor with HTTP web server' -Force | Out-Null;" ^
+  "Write-Host 'Scheduled task created.'"
 if errorlevel 1 (
     echo WARN: Could not create scheduled task. Right-click this bat - Run as administrator.
 ) else (
     echo Scheduled task created.
 )
 
-echo Stopping old instance if any...
-taskkill /IM LibreHardwareMonitor.exe /F >nul 2>&1
-ping 127.0.0.1 -n 3 >nul
-
-echo Starting LibreHardwareMonitor...
-start "" "!LHM_EXE!"
-ping 127.0.0.1 -n 6 >nul
-
-powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8085/data.json' -UseBasicParsing -TimeoutSec 5; Write-Host ('HTTP OK - data.json size ' + $r.Content.Length + ' bytes') } catch { Write-Host 'WARN: data.json not reachable. Open LHM - Options - Remote Web Server - Run - then restart LHM.' }"
+echo.
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8090/data.json' -UseBasicParsing -TimeoutSec 5; Write-Host ('HTTP OK - data.json size ' + $r.Content.Length + ' bytes') } catch { try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8085/data.json' -UseBasicParsing -TimeoutSec 5; Write-Host ('HTTP OK port 8085 - ' + $r.Content.Length + ' bytes') } catch { Write-Host 'WARN: data.json not reachable. Run fix_lhm_webserver.bat as Administrator.' } }"
 
 echo.
 echo Done. Keep LibreHardwareMonitor running for CPU temperature on Cardputer.

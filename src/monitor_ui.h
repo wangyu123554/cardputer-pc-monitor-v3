@@ -59,6 +59,7 @@ class MonitorUi {
   String formatFreqMhz(float mhz) const;
   String formatPercent(float value) const;
   String formatDateTime() const;
+  String formatDeviceBattery() const;
   bool keyWordContains(const Keyboard_Class::KeysState& keys, char expected) const;
   void clearRegion(int x, int y, int w, int h);
 
@@ -83,4 +84,6 @@ class MonitorUi {
   uint32_t lastStatusDrawMs_ = 0;
   String lastStatusText_;
   float displayTempC_ = -1.0f;
+  mutable int smoothBattPercent_ = -1;
+  mutable int lastBattOnBattery_ = -1;
 };

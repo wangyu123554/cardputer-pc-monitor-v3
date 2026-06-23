@@ -13,6 +13,24 @@ if not errorlevel 1 (
     echo Not found: %TASK%
 )
 
+set TASK=Cardputer Agent Watchdog
+schtasks /Query /TN "%TASK%" >nul 2>&1
+if not errorlevel 1 (
+    schtasks /Delete /TN "%TASK%" /F
+    echo Removed: %TASK%
+) else (
+    echo Not found: %TASK%
+)
+
+set TASK=Cardputer LHM Watchdog
+schtasks /Query /TN "%TASK%" >nul 2>&1
+if not errorlevel 1 (
+    schtasks /Delete /TN "%TASK%" /F
+    echo Removed: %TASK%
+) else (
+    echo Not found: %TASK%
+)
+
 set TASK=LibreHardwareMonitor
 schtasks /Query /TN "%TASK%" >nul 2>&1
 if not errorlevel 1 (

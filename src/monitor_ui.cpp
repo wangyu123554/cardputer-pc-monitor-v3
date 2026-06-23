@@ -455,7 +455,7 @@ void MonitorUi::drawStatusBar(const PcStats* stats) {
   auto& d = M5Cardputer.Display;
 
   String datetime = formatDateTime();
-  int batt = M5Cardputer.Power.getBatteryLevel();
+  String battText = formatDeviceBattery();
 
   String link = "----";
   uint16_t linkColor = TFT_DARKGREY;
@@ -473,7 +473,7 @@ void MonitorUi::drawStatusBar(const PcStats* stats) {
     }
   }
 
-  String status = datetime + "  " + link + "  " + String(batt) + "%  " + wifiTag;
+  String status = datetime + "  " + link + "  " + battText + "  " + wifiTag;
   if (status == lastStatusText_) {
     return;
   }
@@ -492,7 +492,7 @@ void MonitorUi::drawStatusBar(const PcStats* stats) {
   d.drawString(link, linkX, kStatusY + 2);
 
   d.setTextColor(TFT_DARKGREY, kPanelBg);
-  d.drawString(String(batt) + "%", 188, kStatusY + 2);
+  d.drawString(battText, 176, kStatusY + 2);
   d.setTextColor(TFT_MAGENTA, kPanelBg);
   d.drawString(wifiTag, 214, kStatusY + 2);
 }
@@ -684,6 +684,40 @@ String MonitorUi::formatPercent(float value) const {
     return String(value, 1) + "%";
   }
   return String(value, 0) + "%";
+}
+
+String MonitorUi::formatDeviceBattery() const {
+  // Cardputer-Adv uses ADC voltage only; USB power biases readings to ~100%.
+  int rawPercent = M5Cardputer.Power.getBatteryLevel();
+  int voltageMv = M5Cardputer.Power.getBatteryVoltage();
+
+  if (rawPercent < 0 && voltageMv <= 0) {
+    return "--%";
+  }
+
+  bool onExternalPower = voltageMv >= 4120 || (rawPercent >= 98 && voltageMv >= 4050);
+
+  if (!onExternalPower) {
+    if (rawPercent < 0) {
+      rawPercent = 0;
+    }
+    if (smoothBattPercent_ < 0) {
+      smoothBattPercent_ = rawPercent;
+    } else {
+      smoothBattPercent_ = static_cast<int>(smoothBattPercent_ * 0.75f + rawPercent * 0.25f + 0.5f);
+    }
+    lastBattOnBattery_ = smoothBattPercent_;
+    return String(smoothBattPercent_) + "%";
+  }
+
+  int showPercent = lastBattOnBattery_ >= 0 ? lastBattOnBattery_ : rawPercent;
+  if (showPercent < 0) {
+    showPercent = 0;
+  }
+  if (showPercent > 100) {
+    showPercent = 100;
+  }
+  return String(showPercent) + "%AC";
 }
 
 String MonitorUi::formatDateTime() const {

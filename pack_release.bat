@@ -19,6 +19,12 @@ for %%F in (
     install_autostart.bat
     install_lhm_autostart.bat
     lhm_watchdog.bat
+    agent_watchdog.ps1
+    lhm_watchdog.ps1
+    remove_watchdog_tasks.ps1
+    remove_watchdog.bat
+    run_lhm_hidden.vbs
+    start_lhm.ps1
     restart_agent.bat
     restart_lhm.bat
     run_agent.bat

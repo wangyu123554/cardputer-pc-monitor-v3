@@ -90,6 +90,6 @@ class StatsClient {
   int failCount_ = 0;
   bool statsUpdated_ = false;
 
-  static const int kMaxFailBeforeOffline = 4;
-  static const uint32_t kStaleGraceMs = 20000;
+  static const int kMaxFailBeforeOffline = 10;
+  static const uint32_t kStaleGraceMs = 60000;
 };

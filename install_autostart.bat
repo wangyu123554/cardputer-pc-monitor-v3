@@ -69,8 +69,12 @@ ping 127.0.0.1 -n 4 >nul
 powershell -NoProfile -Command ^
   "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8765/stats' -UseBasicParsing -TimeoutSec 5; Write-Host ('Agent OK - HTTP ' + $r.StatusCode) } catch { Write-Host ('Agent starting... if FAIL persists, run restart_agent.bat') }"
 
+echo Removing periodic watchdog tasks (they flash a console on Windows)...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0remove_watchdog_tasks.ps1" >nul 2>&1
+
 echo.
 echo Done. Agent runs hidden at logon (~30s after login).
+echo LHM health is checked inside the Agent process — no scheduled watchdog.
 echo Remove autostart: uninstall_autostart.bat
 echo.
 if not defined SILENT pause
